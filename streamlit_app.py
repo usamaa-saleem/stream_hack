@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 import os
-from elevenlabs import Voice, VoiceSettings, generate as generate_audio, set_api_key, Model
+from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
 import time
 import speech_recognition as sr
@@ -23,7 +23,7 @@ try:
     if not elevenlabs_key:
         st.warning("⚠️ ElevenLabs API key not found. Please set the ELEVENLABS_API_KEY environment variable.")
     else:
-        set_api_key(elevenlabs_key)
+        client = ElevenLabs(api_key=elevenlabs_key)
 except Exception as e:
     st.error(f"Error setting up ElevenLabs: {e}")
 
@@ -119,23 +119,12 @@ def transcribe_audio(audio_file):
 
 def play_audio(text):
     try:
-        # Configure voice settings for faster, more natural speech
-        voice = Voice(
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel's voice ID
-            settings=VoiceSettings(
-                stability=0.5,
-                similarity_boost=0.75,
-                style=0.0,
-                use_speaker_boost=True,
-                speed=1.2  # Increase speed by 20%
-            )
-        )
-        
         # Generate audio using ElevenLabs
-        audio = generate_audio(
+        audio = client.text_to_speech.convert(
             text=text,
-            voice=voice,
-            model=Model.eleven_monolingual_v1
+            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel's voice ID
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128",
         )
         
         # Save to temporary file

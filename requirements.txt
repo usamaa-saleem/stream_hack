@@ -4,5 +4,5 @@ python-dotenv
 SpeechRecognition
 sounddevice
 numpy
-elevenlabs>=0.3.0
+elevenlabs==1.57.0
 soundfile
