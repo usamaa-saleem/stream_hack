@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+openai
+elevenlabs
+pydantic
+python-multipart
+gTTS
+pydub
