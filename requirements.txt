@@ -3,6 +3,7 @@ requests
 python-dotenv
 elevenlabs
 SpeechRecognition
-streamlit-webrtc
 numpy
 pydub
+sounddevice
+soundfile
