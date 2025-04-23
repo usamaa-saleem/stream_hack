@@ -1,42 +1,55 @@
-# Travel Assistant Chatbot
+# Voice Travel Assistant
 
-A Streamlit-based travel assistant chatbot that helps users plan their trips, book flights, and hotels.
+A Streamlit application that helps users plan their travel using voice commands.
 
 ## Features
 
-- Natural language conversation interface
-- Flight and hotel booking assistance
-- Itinerary planning
-- Voice response using ElevenLabs
-- Persistent chat history
+- Voice input for natural interaction
+- Travel planning assistance
+- Flight and hotel recommendations
+- Itinerary generation
+- Voice responses using ElevenLabs
 
 ## Setup
 
-1. Clone the repository:
-```bash
-git clone https://github.com/usamaa-saleem/stream_hack.git
-cd stream_hack
-```
-
+1. Clone this repository
 2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Set up environment variables:
+   - Create a `.env` file
+   - Add your ElevenLabs API key:
+     ```
+     ELEVENLABS_API_KEY=your_api_key_here
+     ```
 
-3. Create a `.env` file with your API keys:
-```
-ELEVENLABS_API_KEY=your_api_key_here
-```
+## Running Locally
 
-4. Run the app:
 ```bash
 streamlit run streamlit_app.py
 ```
 
 ## Deployment
 
-The app is ready to be deployed on Streamlit Cloud. Simply connect your GitHub repository to Streamlit Cloud and deploy the `streamlit_app.py` file.
+This app is designed to be deployed on Streamlit Cloud. To deploy:
 
-## Environment Variables
+1. Push your code to a GitHub repository
+2. Go to [Streamlit Cloud](https://streamlit.io/cloud)
+3. Connect your GitHub repository
+4. Set the following secrets in Streamlit Cloud:
+   - `ELEVENLABS_API_KEY`: Your ElevenLabs API key
 
-- `ELEVENLABS_API_KEY`: Your ElevenLabs API key for voice generation 
+## Usage
+
+1. Click the "Start Recording" button
+2. Speak your travel request
+3. Wait for the response
+4. View travel options and itinerary
+
+## Requirements
+
+- Python 3.8+
+- Streamlit
+- ElevenLabs API key
+- Microphone access 
