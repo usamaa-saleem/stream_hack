@@ -1,23 +1,15 @@
 import streamlit as st
 import requests
 import json
-import base64
-import soundfile as sf
-import numpy as np
-import io
-from datetime import datetime
 import os
 from elevenlabs import generate, set_api_key, play, Voice, VoiceSettings
 from dotenv import load_dotenv
 import time
 import speech_recognition as sr
-from pydub import AudioSegment
 import tempfile
-import pyaudio
-import wave
-from gtts import gTTS
-import threading
-import queue
+import sounddevice as sd
+import soundfile as sf
+import numpy as np
 
 # Load environment variables
 load_dotenv()
@@ -27,9 +19,11 @@ API_URL = "https://hack-dubai.onrender.com"
 
 # Initialize ElevenLabs
 try:
-    set_api_key(os.getenv("ELEVENLABS_API_KEY"))
-    if not os.getenv("ELEVENLABS_API_KEY"):
-        raise ValueError("ELEVENLABS_API_KEY environment variable is not set")
+    elevenlabs_key = "sk_6c840a3af881081d5a6439c98f4ff287526a62ccecab3fd4"
+    if not elevenlabs_key:
+        st.warning("⚠️ ElevenLabs API key not found. Please set the ELEVENLABS_API_KEY environment variable.")
+    else:
+        set_api_key(elevenlabs_key)
 except Exception as e:
     st.error(f"Error setting up ElevenLabs: {e}")
 
@@ -44,61 +38,6 @@ if 'audio_playing' not in st.session_state:
     st.session_state.audio_playing = False
 if 'show_response' not in st.session_state:
     st.session_state.show_response = False
-if 'recording' not in st.session_state:
-    st.session_state.recording = False
-if 'stop_recording' not in st.session_state:
-    st.session_state.stop_recording = False
-
-def record_audio():
-    """Record audio from microphone until stopped"""
-    CHUNK = 1024
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 1
-    RATE = 44100
-    
-    p = pyaudio.PyAudio()
-    
-    stream = p.open(format=FORMAT,
-                    channels=CHANNELS,
-                    rate=RATE,
-                    input=True,
-                    frames_per_buffer=CHUNK)
-    
-    frames = []
-    silence_threshold = 500  # Adjust this value based on your microphone sensitivity
-    silence_duration = 0
-    max_silence = 2  # seconds of silence before stopping
-    
-    st.write("Recording... Speak now")
-    
-    while not st.session_state.stop_recording:
-        data = stream.read(CHUNK)
-        frames.append(data)
-        
-        # Check for silence
-        audio_data = np.frombuffer(data, dtype=np.int16)
-        if np.abs(audio_data).mean() < silence_threshold:
-            silence_duration += CHUNK / RATE
-            if silence_duration > max_silence:
-                break
-        else:
-            silence_duration = 0
-    
-    st.write("Finished recording")
-    
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-    
-    # Save the recorded data as a WAV file
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-        wf = wave.open(temp_file.name, 'wb')
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(p.get_sample_size(FORMAT))
-        wf.setframerate(RATE)
-        wf.writeframes(b''.join(frames))
-        wf.close()
-        return temp_file.name
 
 def transcribe_audio(audio_file):
     try:
@@ -153,7 +92,10 @@ def play_audio(text):
         os.unlink(temp_file.name)
         
     except Exception as e:
-        st.error(f"Error playing audio: {e}")
+        if "Invalid API key" in str(e):
+            st.error("❌ Invalid ElevenLabs API key. Please check your ELEVENLABS_API_KEY environment variable.")
+        else:
+            st.error(f"Error playing audio: {e}")
 
 def display_travel_options(options):
     if options:
@@ -198,41 +140,56 @@ def display_itinerary(itinerary):
                     st.write(f"Price: {activity['price']} AED")
                 st.write("---")
 
-def generate_and_play_audio(text):
-    try:
-        if st.session_state.audio_playing:
-            return
-            
-        st.session_state.audio_playing = True
+def record_audio():
+    """Record audio until 2 seconds of silence"""
+    fs = 44100  # Sample rate
+    recording = []
+    silence_threshold = 0.01  # Adjust this value based on your microphone sensitivity
+    silence_duration = 0
+    max_silence = 2  # seconds of silence before stopping
+    
+    def callback(indata, frames, time, status):
+        nonlocal silence_duration
+        if status:
+            print(status)
         
-        # Configure voice settings
-        voice = Voice(
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel's voice ID
-            settings=VoiceSettings(
-                stability=0.5,
-                similarity_boost=0.75,
-                style=0.0,
-                use_speaker_boost=True
-            )
-        )
+        # Check for silence
+        volume_norm = np.linalg.norm(indata) / len(indata)
+        if volume_norm < silence_threshold:
+            silence_duration += frames / fs
+        else:
+            silence_duration = 0
         
-        # Generate and play audio using ElevenLabs
-        audio = generate(
-            text=text,
-            voice=voice,
-            model="eleven_monolingual_v1"
-        )
-        
-        # Play the audio directly
-        play(audio)
-        
-        # Set flag to show response after audio is done
-        st.session_state.show_response = True
-        st.session_state.audio_playing = False
-    except Exception as e:
-        st.error(f"Error playing audio: {e}")
-        st.session_state.audio_playing = False
-        st.session_state.show_response = True
+        recording.append(indata.copy())
+    
+    st.write("Recording... Speak now")
+    
+    # Start recording
+    stream = sd.InputStream(
+        samplerate=fs,
+        channels=1,
+        callback=callback
+    )
+    
+    stream.start()
+    
+    # Wait for silence
+    while silence_duration < max_silence:
+        time.sleep(0.1)
+    
+    # Stop recording
+    stream.stop()
+    stream.close()
+    
+    st.write("Recording finished")
+    
+    # Convert recording to numpy array
+    recording = np.concatenate(recording, axis=0)
+    
+    # Save to temporary file
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+        sf.write(temp_file.name, recording, fs)
+        return temp_file.name
 
 # Streamlit UI
 st.title("Voice Travel Assistant")
@@ -246,10 +203,8 @@ for message in st.session_state.messages:
         if message.get("itinerary"):
             display_itinerary(message["itinerary"])
 
-# Add a "Speak" button at the bottom of the chat
-if st.button("🎤 Speak", key="speak_button"):
-    st.session_state.recording = True
-    st.session_state.stop_recording = False
+# Add record button
+if st.button("🎤 Start Recording"):
     audio_file = record_audio()
     prompt = transcribe_audio(audio_file)
     
@@ -316,6 +271,4 @@ if st.button("Clear Chat"):
     st.session_state.last_message_time = 0
     st.session_state.audio_playing = False
     st.session_state.show_response = False
-    st.session_state.recording = False
-    st.session_state.stop_recording = False
     st.rerun() 
