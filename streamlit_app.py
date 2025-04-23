@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import os
 from dotenv import load_dotenv
-import elevenlabs
+from elevenlabs.client import ElevenLabs
 import speech_recognition as sr
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration, AudioProcessorBase
 import numpy as np
@@ -15,7 +15,14 @@ import queue
 load_dotenv()
 
 # Initialize ElevenLabs API
-elevenlabs.set_api_key(os.getenv("ELEVENLABS_API_KEY"))
+try:
+    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+    if not elevenlabs_key:
+        st.warning("⚠️ ElevenLabs API key not found. Please set the ELEVENLABS_API_KEY environment variable.")
+    else:
+        client = ElevenLabs(api_key=elevenlabs_key)
+except Exception as e:
+    st.error(f"Error setting up ElevenLabs: {e}")
 
 # Initialize session state
 if "messages" not in st.session_state:
