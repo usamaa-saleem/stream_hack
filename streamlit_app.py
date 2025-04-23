@@ -11,6 +11,16 @@ import io
 import tempfile
 import queue
 
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "travel_options" not in st.session_state:
+    st.session_state.travel_options = None
+if "itinerary" not in st.session_state:
+    st.session_state.itinerary = None
+if "audio_queue" not in st.session_state:
+    st.session_state.audio_queue = queue.Queue()
+
 # Load environment variables
 load_dotenv()
 
@@ -24,16 +34,6 @@ try:
 except Exception as e:
     st.error(f"Error setting up ElevenLabs: {e}")
 
-# Initialize session state
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "travel_options" not in st.session_state:
-    st.session_state.travel_options = None
-if "itinerary" not in st.session_state:
-    st.session_state.itinerary = None
-if "audio_queue" not in st.session_state:
-    st.session_state.audio_queue = queue.Queue()
-
 # Configure WebRTC
 RTC_CONFIGURATION = RTCConfiguration(
     {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
@@ -42,6 +42,8 @@ RTC_CONFIGURATION = RTCConfiguration(
 class AudioProcessor(AudioProcessorBase):
     def __init__(self):
         super().__init__()
+        if "audio_queue" not in st.session_state:
+            st.session_state.audio_queue = queue.Queue()
         self.audio_queue = st.session_state.audio_queue
 
     def recv(self, frame):
@@ -187,7 +189,7 @@ def main():
         )
         
         # Process audio from queue
-        if not st.session_state.audio_queue.empty():
+        if "audio_queue" in st.session_state and not st.session_state.audio_queue.empty():
             audio_data = st.session_state.audio_queue.get()
             text = process_audio(audio_data)
             if text:
