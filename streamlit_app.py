@@ -1,101 +1,131 @@
 import streamlit as st
 import requests
-import json
 import os
-from elevenlabs import generate, set_api_key, play, Voice, VoiceSettings
 from dotenv import load_dotenv
-import time
+from elevenlabs.client import ElevenLabs
 import speech_recognition as sr
-import tempfile
-import sounddevice as sd
-import soundfile as sf
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration, AudioProcessorBase
 import numpy as np
+from pydub import AudioSegment
+import io
+import tempfile
+import queue
+
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "travel_options" not in st.session_state:
+    st.session_state.travel_options = None
+if "itinerary" not in st.session_state:
+    st.session_state.itinerary = None
+if "audio_queue" not in st.session_state:
+    st.session_state.audio_queue = queue.Queue()
 
 # Load environment variables
 load_dotenv()
 
-# API Configuration
-API_URL = "https://hack-dubai.onrender.com"
-
-# Initialize ElevenLabs
+# Initialize ElevenLabs API
 try:
-    elevenlabs_key = "sk_6c840a3af881081d5a6439c98f4ff287526a62ccecab3fd4"
+    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
     if not elevenlabs_key:
         st.warning("⚠️ ElevenLabs API key not found. Please set the ELEVENLABS_API_KEY environment variable.")
     else:
-        set_api_key(elevenlabs_key)
+        client = ElevenLabs(api_key=elevenlabs_key)
 except Exception as e:
     st.error(f"Error setting up ElevenLabs: {e}")
 
-# Initialize session state
-if 'conversation_state' not in st.session_state:
-    st.session_state.conversation_state = None
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-if 'last_message_time' not in st.session_state:
-    st.session_state.last_message_time = 0
-if 'audio_playing' not in st.session_state:
-    st.session_state.audio_playing = False
-if 'show_response' not in st.session_state:
-    st.session_state.show_response = False
+# Configure WebRTC
+RTC_CONFIGURATION = RTCConfiguration(
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
 
-def transcribe_audio(audio_file):
-    try:
-        # Initialize recognizer
-        recognizer = sr.Recognizer()
-        
-        # Read the audio file
-        with sr.AudioFile(audio_file) as source:
-            audio = recognizer.record(source)
-            
-        # Transcribe the audio
-        text = recognizer.recognize_google(audio)
-        
-        # Clean up the temporary file
-        os.unlink(audio_file)
-        
-        return text
-    except Exception as e:
-        st.error(f"Error transcribing audio: {e}")
-        return None
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        super().__init__()
+        if "audio_queue" not in st.session_state:
+            st.session_state.audio_queue = queue.Queue()
+        self.audio_queue = st.session_state.audio_queue
 
-def play_audio(text):
+    def recv(self, frame):
+        # Add audio frame to queue
+        self.audio_queue.put(frame.to_ndarray())
+        return frame
+
+def process_audio(audio_data):
+    """Process recorded audio data."""
     try:
-        # Configure voice settings for faster, more natural speech
-        voice = Voice(
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel's voice ID
-            settings=VoiceSettings(
-                stability=0.5,
-                similarity_boost=0.75,
-                style=0.0,
-                use_speaker_boost=True,
-                speed=1.2  # Increase speed by 20%
-            )
-        )
-        
-        # Generate audio using ElevenLabs
-        audio = generate(
-            text=text,
-            voice=voice,
-            model="eleven_monolingual_v1"
+        # Convert audio data to WAV format
+        audio_segment = AudioSegment(
+            data=audio_data.tobytes(),
+            sample_width=2,
+            frame_rate=44100,
+            channels=1
         )
         
         # Save to temporary file
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
-            temp_file.write(audio)
-            temp_file.flush()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            audio_segment.export(temp_file.name, format="wav")
             
-        # Play the audio file
-        os.system(f"afplay {temp_file.name}")
-        
-        # Clean up
-        os.unlink(temp_file.name)
-        
+            # Initialize recognizer
+            recognizer = sr.Recognizer()
+            
+            # Read the audio file
+            with sr.AudioFile(temp_file.name) as source:
+                audio = recognizer.record(source)
+                
+                # Recognize speech using Google Speech Recognition
+                try:
+                    text = recognizer.recognize_google(audio)
+                    return text
+                except sr.UnknownValueError:
+                    return "Could not understand audio"
+                except sr.RequestError as e:
+                    return f"Error with the speech recognition service: {e}"
     except Exception as e:
-        if "Invalid API key" in str(e):
-            st.error("❌ Invalid ElevenLabs API key. Please check your ELEVENLABS_API_KEY environment variable.")
+        return f"Error processing audio: {str(e)}"
+
+def process_message(text):
+    """Process user message and get response from API."""
+    try:
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": text})
+        
+        # Make API request
+        response = requests.post(
+            "http://localhost:8000/chat",
+            json={"message": text}
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Update travel options and itinerary if present
+            if "travel_options" in data:
+                st.session_state.travel_options = data["travel_options"]
+            if "itinerary" in data:
+                st.session_state.itinerary = data["itinerary"]
+            
+            # Add assistant response to chat history
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": data["response"]
+            })
+            
+            return data["response"]
         else:
-            st.error(f"Error playing audio: {e}")
+            error_msg = f"Error: {response.status_code} - {response.text}"
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": error_msg
+            })
+            return error_msg
+    except Exception as e:
+        error_msg = f"Error processing message: {str(e)}"
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": error_msg
+        })
+        return error_msg
 
 def display_travel_options(options):
     if options:
@@ -140,135 +170,58 @@ def display_itinerary(itinerary):
                     st.write(f"Price: {activity['price']} AED")
                 st.write("---")
 
-def record_audio():
-    """Record audio until 2 seconds of silence"""
-    fs = 44100  # Sample rate
-    recording = []
-    silence_threshold = 0.01  # Adjust this value based on your microphone sensitivity
-    silence_duration = 0
-    max_silence = 2  # seconds of silence before stopping
+def main():
+    st.title("Travel Assistant")
     
-    def callback(indata, frames, time, status):
-        nonlocal silence_duration
-        if status:
-            print(status)
+    # Create two columns for chat and travel info
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Chat")
         
-        # Check for silence
-        volume_norm = np.linalg.norm(indata) / len(indata)
-        if volume_norm < silence_threshold:
-            silence_duration += frames / fs
-        else:
-            silence_duration = 0
+        # Audio recording using WebRTC
+        webrtc_ctx = webrtc_streamer(
+            key="audio",
+            mode=WebRtcMode.SENDONLY,
+            rtc_configuration=RTC_CONFIGURATION,
+            media_stream_constraints={"audio": True},
+            audio_processor_factory=AudioProcessor
+        )
         
-        recording.append(indata.copy())
+        # Process audio from queue
+        if "audio_queue" in st.session_state and not st.session_state.audio_queue.empty():
+            audio_data = st.session_state.audio_queue.get()
+            text = process_audio(audio_data)
+            if text:
+                response = process_message(text)
+                st.write(f"You said: {text}")
+                st.write(f"Assistant: {response}")
+        
+        # Display chat history
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+                if message.get("travel_options"):
+                    display_travel_options(message["travel_options"])
+                if message.get("itinerary"):
+                    display_itinerary(message["itinerary"])
     
-    st.write("Recording... Speak now")
-    
-    # Start recording
-    stream = sd.InputStream(
-        samplerate=fs,
-        channels=1,
-        callback=callback
-    )
-    
-    stream.start()
-    
-    # Wait for silence
-    while silence_duration < max_silence:
-        time.sleep(0.1)
-    
-    # Stop recording
-    stream.stop()
-    stream.close()
-    
-    st.write("Recording finished")
-    
-    # Convert recording to numpy array
-    recording = np.concatenate(recording, axis=0)
-    
-    # Save to temporary file
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-        sf.write(temp_file.name, recording, fs)
-        return temp_file.name
+    with col2:
+        st.subheader("Travel Information")
+        
+        # Display travel options if available
+        if st.session_state.travel_options:
+            st.write("### Selected Travel Options")
+            for option in st.session_state.travel_options:
+                st.write(f"- {option}")
+        
+        # Display itinerary if available
+        if st.session_state.itinerary:
+            st.write("### Your Itinerary")
+            for day, activities in st.session_state.itinerary.items():
+                st.write(f"**{day}**")
+                for activity in activities:
+                    st.write(f"- {activity}")
 
-# Streamlit UI
-st.title("Voice Travel Assistant")
-
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
-        if message.get("travel_options"):
-            display_travel_options(message["travel_options"])
-        if message.get("itinerary"):
-            display_itinerary(message["itinerary"])
-
-# Add record button
-if st.button("🎤 Start Recording"):
-    audio_file = record_audio()
-    prompt = transcribe_audio(audio_file)
-    
-    if prompt:
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.write(prompt)
-
-        # Prepare request payload
-        payload = {
-            "message": prompt,
-            "conversation_state": st.session_state.conversation_state
-        }
-
-        try:
-            # Show loading spinner while waiting for response
-            with st.spinner("Generating response..."):
-                # Make API call
-                response = requests.post(f"{API_URL}/api/chat", json=payload)
-                response_data = response.json()
-
-                # Update conversation state
-                st.session_state.conversation_state = response_data["updated_conversation_state"]
-
-                # Add timestamp to track the most recent message
-                current_time = time.time()
-                st.session_state.last_message_time = current_time
-
-                # Reset show response flag
-                st.session_state.show_response = False
-
-                # Play audio response
-                play_audio(response_data["text_response"])
-
-                # Add assistant response to chat history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": response_data["text_response"],
-                    "timestamp": current_time,
-                    "travel_options": response_data.get("travel_options"),
-                    "itinerary": response_data.get("itinerary")
-                })
-                
-                # Display assistant response
-                with st.chat_message("assistant"):
-                    st.write(response_data["text_response"])
-                    
-                    # Display travel options if available
-                    if response_data.get("travel_options"):
-                        display_travel_options(response_data["travel_options"])
-                    
-                    # Display itinerary if available
-                    if response_data.get("itinerary"):
-                        display_itinerary(response_data["itinerary"])
-
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-
-# Add clear chat button
-if st.button("Clear Chat"):
-    st.session_state.messages = []
-    st.session_state.conversation_state = None
-    st.session_state.last_message_time = 0
-    st.session_state.audio_playing = False
-    st.session_state.show_response = False
-    st.rerun()
+if __name__ == "__main__":
+    main()
