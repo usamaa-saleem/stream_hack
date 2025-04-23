@@ -1,8 +1,8 @@
 streamlit
 requests
 python-dotenv
+elevenlabs
 SpeechRecognition
-sounddevice
+streamlit-webrtc
 numpy
-elevenlabs==1.57.0
-soundfile
+pydub
