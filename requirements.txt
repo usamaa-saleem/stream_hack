@@ -2,8 +2,7 @@ streamlit
 requests
 python-dotenv
 SpeechRecognition
-pyaudio
+sounddevice
 numpy
 elevenlabs
 soundfile
-pydub
