@@ -10,9 +10,10 @@ import tempfile
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration, AudioProcessorBase
 from pydub import AudioSegment
 import io
+import queue
 
 # Load environment variables
 load_dotenv()
@@ -45,6 +46,8 @@ if 'travel_options' not in st.session_state:
     st.session_state.travel_options = None
 if 'itinerary' not in st.session_state:
     st.session_state.itinerary = None
+if 'audio_queue' not in st.session_state:
+    st.session_state.audio_queue = queue.Queue()
 
 # Set page config
 st.set_page_config(
@@ -57,6 +60,16 @@ st.set_page_config(
 RTC_CONFIGURATION = RTCConfiguration(
     {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
 )
+
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        super().__init__()
+        self.audio_queue = st.session_state.audio_queue
+
+    def recv(self, frame):
+        # Add audio frame to queue
+        self.audio_queue.put(frame.to_ndarray())
+        return frame
 
 def process_audio(audio_data):
     """Process recorded audio data."""
@@ -187,16 +200,18 @@ with col1:
     st.subheader("Chat")
     
     # Audio recording using WebRTC
-    audio_data = webrtc_streamer(
+    webrtc_ctx = webrtc_streamer(
         key="audio",
         mode=WebRtcMode.SENDONLY,
         rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={"audio": True},
+        audio_processor_factory=AudioProcessor
     )
     
-    if audio_data and audio_data.audio:
-        # Process the audio data
-        text = process_audio(audio_data.audio.to_ndarray())
+    # Process audio from queue
+    if not st.session_state.audio_queue.empty():
+        audio_data = st.session_state.audio_queue.get()
+        text = process_audio(audio_data)
         if text:
             response = process_message(text)
             st.write(f"You said: {text}")
