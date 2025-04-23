@@ -1,7 +1,7 @@
 streamlit
 requests
 python-dotenv
-elevenlabs
+elevenlabs==0.2.24
 SpeechRecognition
 numpy
 pydub
