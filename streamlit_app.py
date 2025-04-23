@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 import os
-from elevenlabs import generate, set_api_key, play, Voice, VoiceSettings
+from elevenlabs import Voice, VoiceSettings, generate as generate_audio, set_api_key, Model
 from dotenv import load_dotenv
 import time
 import speech_recognition as sr
@@ -132,10 +132,10 @@ def play_audio(text):
         )
         
         # Generate audio using ElevenLabs
-        audio = generate(
+        audio = generate_audio(
             text=text,
             voice=voice,
-            model="eleven_monolingual_v1"
+            model=Model.eleven_monolingual_v1
         )
         
         # Save to temporary file
