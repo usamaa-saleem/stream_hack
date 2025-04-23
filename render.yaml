@@ -2,7 +2,9 @@ services:
   - type: web
     name: stream-hack
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      apt-get update && apt-get install -y portaudio19-dev python3-pyaudio
+      pip install -r requirements.txt
     startCommand: streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0
     envVars:
       - key: ELEVENLABS_API_KEY
